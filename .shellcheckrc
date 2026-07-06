@@ -1,0 +1,3 @@
+# Follow sourced files (lib/sizing.sh) so vars used only there are not SC2034.
+external-sources=true
+source-path=SCRIPTDIR

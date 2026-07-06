@@ -10,6 +10,11 @@ jobs:
   shellcheck:
     name: ShellCheck (shell scripts)
     runs-on: ubuntu-latest
+    env:
+      # Follow sourced files (lib/sizing.sh) so globals consumed only there are
+      # not reported as SC2034. Read directly by the shellcheck binary, so it
+      # applies no matter how the action invokes it (belt to the repo .shellcheckrc).
+      SHELLCHECK_OPTS: --external-sources
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
