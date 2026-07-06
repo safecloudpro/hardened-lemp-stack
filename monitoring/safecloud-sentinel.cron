@@ -1,0 +1,11 @@
+# =============================================================================
+# SafeCloud.PRO - Security Sentinel Cron Configuration
+# Place this file in /etc/cron.d/safecloud-sentinel to activate automated hourly scans.
+# Ensure that /usr/local/bin/alert-apparmor-status.sh is executable and owned by root.
+# =============================================================================
+
+# Run the AppArmor log sweeper and service status auditor every hour on the hour
+0 * * * * root /usr/local/bin/alert-apparmor-status.sh >> /var/log/safecloud_sentinel_cron.log 2>&1
+
+# Optional: Run a light check for quick reaction times every 10 minutes
+# */10 * * * * root /usr/local/bin/alert-apparmor-status.sh >> /var/log/safecloud_sentinel_cron.log 2>&1

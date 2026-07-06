@@ -1,0 +1,81 @@
+# ==============================================================================
+# SafeCloud.PRO - Prometheus alerting rules for the hardened LEMP host
+# Load from your Prometheus server (rule_files:) — these run on the Prometheus
+# side, scraping the node_exporter this stack binds to 127.0.0.1:9100.
+#
+# Validate:  promtool check rules monitoring/prometheus-alerts.yml
+# ==============================================================================
+groups:
+  - name: safecloud-node
+    rules:
+      - alert: NodeExporterDown
+        expr: up{job="node"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "node_exporter down on {{ $labels.instance }}"
+          description: "Prometheus can't scrape node_exporter for >3m — the host or the exporter is down."
+
+      - alert: HostHighCpuLoad
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU on {{ $labels.instance }}"
+          description: "CPU usage has been above 90% for 10 minutes ({{ printf \"%.0f\" $value }}%)."
+
+      - alert: HostHighLoadAverage
+        expr: node_load15 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High load average on {{ $labels.instance }}"
+          description: "15m load average is >2x the vCPU count for 15 minutes — the box is saturated."
+
+      - alert: HostLowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low available memory on {{ $labels.instance }}"
+          description: "Available memory <10% for 5 minutes — risk of OOM; check the sizing budget (tune-stack.sh)."
+
+      - alert: HostMemoryUnderPressure
+        expr: rate(node_vmstat_pgmajfault[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory pressure (major page faults) on {{ $labels.instance }}"
+          description: "High rate of major page faults — the working set no longer fits in RAM."
+
+      - alert: HostDiskWillFillIn24h
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24*3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk filling on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: "At the current write rate this filesystem runs out of space within ~24h."
+
+      - alert: HostDiskAlmostFull
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk almost full on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: "Less than 10% free space remaining."
+
+      - alert: HostUnexpectedReboot
+        expr: node_time_seconds - node_boot_time_seconds < 600
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.instance }} recently rebooted"
+          description: "Uptime is under 10 minutes — confirm this reboot was expected."

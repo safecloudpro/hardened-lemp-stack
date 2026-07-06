@@ -1,0 +1,56 @@
+# ==============================================================================
+# SafeCloud.PRO - Fail2ban Jail Configuration for Hardened LEMP Stack
+# Target OS: Ubuntu 26.04 LTS (Resolute Raccoon / Linux Kernel 7.0)
+# Path: /etc/fail2ban/jail.local
+# ==============================================================================
+# Confines and bans abusive IP addresses at the firewall layer, completely
+# bypassing expensive PHP-FPM application process loops under brute-force spikes.
+# ==============================================================================
+
+[DEFAULT]
+# Ban IPs for 1 hour after triggering a jail threshold
+bantime  = 3600
+# Monitor window of 10 minutes
+findtime = 600
+# Trigger ban after 5 failed matches within the findtime
+maxretry = 5
+
+# Override default ban action to use UFW
+banaction = ufw
+
+# Whitelist local loopback and company administrative IPs.
+# IMPORTANT: append your own static admin IPs here so an aggressive jail can
+# never lock you out, e.g.:  ignoreip = 127.0.0.1/8 ::1 203.0.113.10
+ignoreip = 127.0.0.1/8 ::1
+
+# ------------------------------------------------------------------------------
+# 1. WP-LOGIN & XML-RPC BRUTE-FORCE JAIL
+# ------------------------------------------------------------------------------
+[nginx-wp-login]
+enabled  = true
+port     = http,https
+filter   = nginx-wp-login
+logpath  = /var/log/nginx/access.log
+maxretry = 5
+bantime  = 86400
+
+# ------------------------------------------------------------------------------
+# 2. APPARMOR POLICY INTRUSION JAIL (EXPERIMENTAL — DISABLED BY DEFAULT)
+# ------------------------------------------------------------------------------
+# Intended to ban client IPs correlated with kernel-level AppArmor denials.
+# CAVEAT: stock AVC denial records do NOT include the remote client IP, so this
+# jail only functions with an enriched audit pipeline that appends target="<ip>".
+# Without one it matches nothing. Prefer the alerting route:
+# scripts/alert-apparmor-status.sh notifies you of every denial sweep.
+# Enable only after validating matches with:
+#   fail2ban-regex /var/log/audit/audit.log /etc/fail2ban/filter.d/nginx-apparmor.conf
+# ------------------------------------------------------------------------------
+[nginx-apparmor]
+enabled  = false
+port     = http,https
+filter   = nginx-apparmor
+logpath  = /var/log/audit/audit.log
+           /var/log/syslog
+maxretry = 1
+# Ban for 1 week for triggering kernel access control restrictions
+bantime  = 604800

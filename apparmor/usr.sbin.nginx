@@ -1,0 +1,128 @@
+# ==============================================================================
+# SafeCloud.PRO - Enterprise AppArmor Profile for Hardened Nginx Web Tier
+# Target OS: Ubuntu 26.04 LTS
+# Binary Path: /usr/sbin/nginx
+# Version: 1.0.0 (LTS Hardened)
+# ==============================================================================
+# This profile enforces strict process-level confinement and directory containment 
+# on the Nginx web server, mitigating file leakage and arbitrary code execution vectors.
+# ==============================================================================
+
+#include <tunables/global>
+
+/usr/sbin/nginx {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+  #include <abstractions/ssl_certs>
+
+  # ----------------------------------------
+  # 1. PROCESS & CAPABILITY PRIVILEGES
+  # ----------------------------------------
+  # Allow binding to privileged ports (80/443) and managing worker processes
+  capability setuid,
+  capability setgid,
+  capability chown,
+  capability kill,
+  capability dac_override,
+  capability dac_read_search,
+  capability net_bind_service,
+  capability sys_resource,
+
+  # ----------------------------------------
+  # 2. NETWORK PROTOCOLS & SOCKETS
+  # ----------------------------------------
+  # Allow standard TCP and HTTP/3 QUIC (UDP) network transport
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+
+  # Allow local interservice Unix domain sockets (e.g., PHP-FPM fastcgi loop)
+  network unix stream,
+  network unix dgram,
+
+  # ----------------------------------------
+  # 3. CORE FILE READ ACCESS (Nginx Engine)
+  # ----------------------------------------
+  # Read-only permission to Nginx binary and standard binaries
+  /usr/sbin/nginx mr,
+  /usr/bin/nginx mr,
+
+  # Read-only configuration file boundaries
+  /etc/nginx/ r,
+  /etc/nginx/** r,
+  /etc/mime.types r,
+  /etc/nsswitch.conf r,
+  /etc/passwd r,
+  /etc/group r,
+
+  # Read-only permission for SSL certificates and origin keys
+  /etc/ssl/** r,
+  /etc/ssl/certs/** r,
+  /etc/ssl/private/** r,
+  /etc/nginx/certs/ r,
+  /etc/nginx/certs/** r,
+
+  # ----------------------------------------
+  # 4. SYSTEM PATHS & RUNTIME DESCRIPTORS
+  # ----------------------------------------
+  # Access to basic runtime parameters and dev interfaces
+  /dev/null rw,
+  /dev/urandom r,
+  /dev/random r,
+  /proc/locks r,
+  /proc/cpuinfo r,
+  /proc/sys/kernel/ngroups_max r,
+  /sys/devices/system/cpu/ r,
+  /sys/devices/system/cpu/** r,
+
+  # PID and system run descriptors
+  /run/nginx.pid rw,
+  /var/run/nginx.pid rw,
+  /run/shm/nginx_shared_zone_* rw,
+
+  # Nginx scratch space: client body, proxy and fastcgi temp buffers
+  # (without this, large POST/media uploads fail under enforcement)
+  /var/lib/nginx/ r,
+  /var/lib/nginx/** rw,
+
+  # ----------------------------------------
+  # 5. SITE WORKROOT & MEDIA READ ACCESS
+  # ----------------------------------------
+  # Read-only access to standard WordPress public directories
+  /var/www/html/ r,
+  /var/www/html/** r,
+  
+  # Strictly deny ANY write operations to public core system files 
+  # (www-data should never have write access to active plugin/theme code)
+  deny /var/www/html/wp-admin/** w,
+  deny /var/www/html/wp-includes/** w,
+  deny /var/www/html/wp-content/plugins/** w,
+  deny /var/www/html/wp-content/themes/** w,
+
+  # Authorize write access specifically to designated uploads directory
+  /var/www/html/wp-content/uploads/ r,
+  /var/www/html/wp-content/uploads/** rw,
+
+  # ----------------------------------------
+  # 6. TRANSACTION LOGGING (Write Boundaries)
+  # ----------------------------------------
+  # Standard Nginx access and error logging
+  /var/log/nginx/ r,
+  /var/log/nginx/** rw,
+  /var/log/nginx/*.log w,
+
+  # ----------------------------------------
+  # 7. INTER-SERVICE COMMUNICATION SOCKETS
+  # ----------------------------------------
+  # Allow reading/writing to localized fastcgi PHP sockets
+  /run/php/ r,
+  /run/php/php*.sock rw,
+  /var/run/php/php*.sock rw,
+
+  # Exclude arbitrary command execution (No shell access)
+  deny /bin/** x,
+  deny /usr/bin/** x,
+  deny /usr/local/bin/** x,
+}

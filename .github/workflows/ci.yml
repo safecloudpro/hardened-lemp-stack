@@ -1,0 +1,96 @@
+name: CI — Lint & Validate
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck (shell scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: '.'
+          severity: warning
+
+  apparmor:
+    name: AppArmor profile syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install AppArmor parser
+        run: sudo apt-get update && sudo apt-get install -y apparmor apparmor-utils
+
+      - name: Validate profiles compile cleanly
+        run: |
+          set -e
+          for profile in apparmor/usr.sbin.*; do
+            echo "== Checking: $profile"
+            sudo apparmor_parser -Q -K "$profile"
+          done
+
+  php:
+    name: PHP lint (MU-plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          set -e
+          for f in wordpress/mu-plugins/*.php; do
+            echo "== Linting: $f"
+            php -l "$f"
+          done
+
+  unit:
+    name: Unit tests (lib/sizing.sh via bats)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Run bats
+        run: bats tests/
+
+  smoke:
+    name: Smoke test (dry-run, syntax, --help)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: bash -n over every script
+        run: |
+          set -e
+          while IFS= read -r s; do echo "== syntax: $s"; bash -n "$s"; done \
+            < <(grep -rIlE '^#!.*(bash|sh)' . --include='*.sh' | grep -v '/.git/')
+
+      - name: setup.sh dry-run (unprivileged; touches nothing)
+        run: ./setup.sh --dry-run --no-color
+
+      - name: --help works for the flag-driven scripts
+        run: |
+          set -e
+          for s in setup.sh tune-stack.sh configure-security-group.sh \
+                   configure-cloudflare-realip.sh wordpress-provision.sh \
+                   harden-wordpress.sh backup.sh restore.sh manage.sh \
+                   scripts/status-report.sh scripts/fail2ban-report.sh \
+                   scripts/performance-benchmark.sh scripts/alert-apparmor-status.sh; do
+            [ -f "$s" ] || continue
+            echo "== $s --help"
+            bash "$s" --help >/dev/null
+          done

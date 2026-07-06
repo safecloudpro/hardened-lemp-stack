@@ -1,0 +1,156 @@
+# =============================================================================
+# SafeCloud.PRO - Hardened AppArmor Confinement Profile for MariaDB Database
+# Target OS: Ubuntu 26.04 LTS
+# Binary Path: /usr/sbin/mariadbd
+# Version: 1.0.0 (LTS Hardened)
+# =============================================================================
+# This profile enforces strict process-level confinement and directory containment 
+# on the MariaDB 11.x database daemon, preventing unauthorized filesystem access 
+# and lateral privilege escalation in case of database-level compromise.
+# =============================================================================
+
+#include <tunables/global>
+
+# NOTE: Ubuntu's mariadb-server package ships its own profile at
+# /etc/apparmor.d/mariadbd with the SAME attachment path (/usr/sbin/mariadbd).
+# Two profiles claiming one binary make the attachment ambiguous and the kernel
+# confines with NEITHER (mariadbd runs unconfined). Disable the distro profile
+# before loading this one:
+#   sudo ln -sf /etc/apparmor.d/mariadbd /etc/apparmor.d/disable/mariadbd
+#   sudo apparmor_parser -R /etc/apparmor.d/mariadbd
+#
+# attach_disconnected is required for the systemd readiness socket
+# (/run/systemd/notify resolves as a disconnected path from mariadbd's view).
+/usr/sbin/mariadbd flags=(attach_disconnected) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+  #include <abstractions/ssl_certs>
+  #include <abstractions/user-tmp>
+
+  # ---------------------------------------------------------------------------
+  # 1. PROCESS CAPABILITIES & SYSTEM PRIVILEGES
+  # ---------------------------------------------------------------------------
+  # Restrict capabilities strictly to database user management and locking
+  capability setuid,
+  capability setgid,
+  capability dac_override,
+  capability dac_read_search,
+  capability sys_resource,   # Allow raising open file limits (nofile)
+  capability ipc_lock,       # Allow system memory locks if configured
+
+  # ---------------------------------------------------------------------------
+  # 2. NETWORK PROTOCOLS & INTERSERVICE SOCKETS
+  # ---------------------------------------------------------------------------
+  # Permit network communication for local loopback (127.0.0.1) port 3306 binding
+  network inet stream,
+  network inet6 stream,
+
+  # Allow local socket transport (Unix Domain Sockets)
+  network unix stream,
+  network unix dgram,
+
+  # ---------------------------------------------------------------------------
+  # 3. CORE FILE READ ACCESS (MariaDB Configuration & Binaries)
+  # ---------------------------------------------------------------------------
+  # Read/execute the core database binaries and shared libraries
+  /usr/sbin/mariadbd mr,
+  /usr/sbin/mysqld mr,       # Fallback link representation
+
+  # Read-only configuration directories
+  /etc/mysql/ r,
+  /etc/mysql/** r,
+  /etc/mysql/mariadb.conf.d/ r,
+  /etc/mysql/mariadb.conf.d/** r,
+
+  # Charsets, error messages, and plugin data shipped by the server package
+  # (Ubuntu 26.04 / MariaDB 11.x installs under /usr/share/mariadb;
+  #  older releases used /usr/share/mysql)
+  /usr/share/mariadb/ r,
+  /usr/share/mariadb/** r,
+  /usr/share/mysql/ r,
+  /usr/share/mysql/** r,
+  
+  # Read-only TLS certificates and certificate authority certs
+  /etc/mysql/cacert.pem r,
+  /etc/mysql/server-cert.pem r,
+  /etc/mysql/server-key.pem r,
+
+  # ---------------------------------------------------------------------------
+  # 4. SYSTEM RUNTIMES, ENGINE STATS & SHARED LIBRARIES
+  # ---------------------------------------------------------------------------
+  /dev/null rw,
+  /dev/urandom r,
+  /dev/random r,
+  /proc/locks r,
+  /proc/sys/fs/file-max r,
+  /proc/sys/vm/overcommit_memory r,
+  /proc/sys/kernel/sched_rt_runtime_us r,
+  /proc/cpuinfo r,
+  owner /proc/*/cgroup r,
+  # InnoDB probes the underlying block device's sector geometry at startup
+  /sys/block/ r,
+  /sys/devices/**/queue/physical_block_size r,
+  /sys/devices/**/queue/logical_block_size r,
+  /sys/devices/**/queue/rotational r,
+  /sys/devices/**/dev r,
+  # MariaDB 11.x memory-pressure-aware buffer management (PSI via cgroup v2)
+  owner /sys/fs/cgroup/**/mariadb.service/memory.pressure rw,
+  /sys/devices/system/cpu/ r,
+  /sys/devices/system/cpu/** r,
+  /sys/devices/system/node/ r,
+  /sys/devices/system/node/** r,
+
+  # Shared memory and runtime allocations
+  /run/mysqld/ r,
+  /run/mysqld/mysqld.pid rw,
+  /run/mysqld/mysqld.sock rw,
+  /var/run/mysqld/ r,
+  /var/run/mysqld/mysqld.pid rw,
+  /var/run/mysqld/mysqld.sock rw,
+
+  # systemd readiness notification — the mariadb unit is Type=notify; without
+  # this write systemd never sees READY=1 and the start times out.
+  /run/systemd/notify w,
+
+  # ---------------------------------------------------------------------------
+  # 5. DATA DIRECTORY WRITE BOUNDARIES
+  # ---------------------------------------------------------------------------
+  # Allow full read, write, and locking permissions in the data directory
+  # (Ubuntu 26.04 / MariaDB 11.x uses /var/lib/mariadb; older used /var/lib/mysql)
+  /var/lib/mariadb/ r,
+  /var/lib/mariadb/** rwk,
+  /var/lib/mysql/ r,
+  /var/lib/mysql/** rwk,
+
+  # ---------------------------------------------------------------------------
+  # 6. TRANSACTION LOGGING, BINLOGS & AUDIT LOGS
+  # ---------------------------------------------------------------------------
+  # Limit system-level write capabilities strictly to MariaDB logs
+  /var/log/mysql/ r,
+  /var/log/mysql/** rw,
+  /var/log/mysql/*.log w,
+  /var/log/mysql/*.err w,
+
+  # ---------------------------------------------------------------------------
+  # 7. TEMPORARY STORAGE & DISK-BASED SORTING
+  # ---------------------------------------------------------------------------
+  # Restrict temporary tables and file operations to isolated tmp directories
+  /tmp/ r,
+  /tmp/** rwk,
+  /var/tmp/ r,
+  /var/tmp/** rwk,
+
+  # ---------------------------------------------------------------------------
+  # 8. PROCESS BLOCKING (Anti-Injection Shell Confinement)
+  # ---------------------------------------------------------------------------
+  # Categorically prevent execution of any system binaries, shells, or scripts.
+  # This blocks attackers from executing commands using SQL Injection or UDF functions,
+  # even if the FILE privilege or database exploits are compromised.
+  deny /bin/** x,
+  deny /sbin/** x,
+  deny /usr/bin/** x,
+  deny /usr/sbin/** x,
+  deny /usr/local/bin/** x,
+  deny /usr/local/sbin/** x,
+}

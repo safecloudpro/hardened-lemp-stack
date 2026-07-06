@@ -1,0 +1,102 @@
+# =============================================================================
+# SafeCloud.PRO - Hardened AppArmor Confinement Profile for Redis Cache Tier
+# Target OS: Ubuntu 26.04 LTS
+# Profile Path: /etc/apparmor.d/usr.sbin.redis-server
+# =============================================================================
+# This profile enforces strict process confinement over the Redis server daemon,
+# restricting it to localized UNIX sockets and memory-safe persistence boundaries.
+# =============================================================================
+
+#include <tunables/global>
+
+# attach_disconnected: the unit's mount sandbox (ProtectSystem=strict) makes
+# the systemd notify socket resolve as a disconnected path from redis's view.
+/usr/sbin/redis-server flags=(attach_disconnected) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  # ---------------------------------------------------------------------------
+  # 1. PROCESS CAPABILITIES & SYSTEM PRIVILEGES
+  # ---------------------------------------------------------------------------
+  # Restrict capabilities strictly to system settings needed for service initialization
+  capability setuid,
+  capability setgid,
+  capability chown,
+  capability dac_override,
+  capability dac_read_search,
+  capability sys_resource, # Allowed for overcommit memory management and socket limit adjustments
+
+  # ---------------------------------------------------------------------------
+  # 2. LOCALIZED NETWORK & INTER-SERVICE SOCKETS
+  # ---------------------------------------------------------------------------
+  # Redis in this stack is secured over Unix sockets. Disabling public TCP binding.
+  network unix stream,
+  network unix dgram,
+
+  # Deny raw internet network access to prevent remote bypasses or outward exfiltration
+  # (Redis in this hardened stack binds strictly to UNIX domain sockets)
+  deny network inet stream,
+  deny network inet6 stream,
+
+  # ---------------------------------------------------------------------------
+  # 3. CORE FILE READ ACCESS (Configuration & Engine)
+  # ---------------------------------------------------------------------------
+  # Read/execute Redis binary
+  /usr/sbin/redis-server mr,
+  /usr/bin/redis-server mr,
+
+  # Read configuration directory files
+  /etc/redis/ r,
+  /etc/redis/** r,
+  
+  # Basic system files access
+  /etc/passwd r,
+  /etc/group r,
+  /etc/nsswitch.conf r,
+
+  # ---------------------------------------------------------------------------
+  # 4. SYSTEM RUNTIMES & DESCRIPTORS
+  # ---------------------------------------------------------------------------
+  /dev/null rw,
+  /dev/urandom r,
+  /dev/random r,
+  /proc/sys/vm/overcommit_memory r,
+  /sys/kernel/mm/transparent_hugepage/enabled r,
+  /sys/devices/system/cpu/online r,
+  # Redis reads its own memory maps (RSS reporting / THP checks) and the
+  # active clocksource (monotonic clock selection) at startup
+  owner /proc/*/smaps r,
+  owner /proc/*/stat r,
+  owner /proc/*/maps r,
+  /proc/sys/net/core/somaxconn r,
+  /sys/devices/system/clocksource/clocksource0/current_clocksource r,
+
+  # systemd readiness notification — the redis unit is Type=notify; without
+  # this write systemd never sees READY=1 and the start times out.
+  /run/systemd/notify w,
+
+  # Runtime descriptors and process ID allocation
+  /run/redis/ rw,
+  /run/redis/** rwk,
+  /var/run/redis/ rw,
+  /var/run/redis/** rwk,
+
+  # ---------------------------------------------------------------------------
+  # 5. DATA PERSISTENCE BOUNDARIES (Read/Write/Lock)
+  # ---------------------------------------------------------------------------
+  # Restrict persistence snapshots (RDB/AOF dumps) strictly to the designated system cache
+  /var/lib/redis/ rw,
+  /var/lib/redis/** rwk,
+  /var/log/redis/ rw,
+  /var/log/redis/** rwk,
+
+  # ---------------------------------------------------------------------------
+  # 6. SHELL & SYSTEM COMMAND EXECUTION LOCKDOWN
+  # ---------------------------------------------------------------------------
+  # Explicitly deny execution of any administrative shells or command binaries
+  # This guarantees that even if a critical exploit attempts to execute an arbitrary 
+  # system command via Redis, the kernel intercepts and terminates the process.
+  deny /bin/** x,
+  deny /usr/bin/** x,
+  deny /usr/local/bin/** x,
+}

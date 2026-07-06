@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="625" viewBox="0 0 880 640" role="img" aria-label="Seven defense layers of the SafeCloud.PRO hardened LEMP stack" font-family="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="dArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5FA8DC"/>
+    </marker>
+  </defs>
+
+  <rect width="880" height="640" rx="16" fill="#0B2545"/>
+
+  <text x="440" y="44" text-anchor="middle" font-size="22" font-weight="700" fill="#FFFFFF">Defense in Depth — 7 Layers</text>
+  <text x="440" y="68" text-anchor="middle" font-size="13" fill="#B9CCE0">Every request crosses every layer. Each layer assumes the one above it has failed.</text>
+
+  <!-- Side arrow -->
+  <line x1="64" y1="106" x2="64" y2="556" stroke="#5FA8DC" stroke-width="2.5" marker-end="url(#dArrow)"/>
+  <text x="46" y="330" font-size="11.5" fill="#8FB3D4" transform="rotate(-90 46 330)" text-anchor="middle">attack surface shrinks ➜</text>
+
+  <!-- Layer rows: x=96 width=728 height=54 gap=10 -->
+  <!-- 1 -->
+  <g>
+    <rect x="96" y="100" width="728" height="54" rx="9" fill="#1B6CA8"/>
+    <circle cx="126" cy="127" r="15" fill="#0B2545"/>
+    <text x="126" y="132" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">1</text>
+    <text x="152" y="122" font-size="13.5" font-weight="700" fill="#FFFFFF">Edge — Cloudflare WAF &amp; mTLS Origin Pulls</text>
+    <text x="152" y="141" font-size="11.5" fill="#DCEBF7">Managed WAF · TLS 1.3 · Turnstile bot challenges · origin accepts only Cloudflare-signed handshakes</text>
+  </g>
+  <!-- 2 -->
+  <g>
+    <rect x="96" y="164" width="728" height="54" rx="9" fill="#B9770E"/>
+    <circle cx="126" cy="191" r="15" fill="#0B2545"/>
+    <text x="126" y="196" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">2</text>
+    <text x="152" y="186" font-size="13.5" font-weight="700" fill="#FFFFFF">Network Perimeter — UFW + Fail2ban</text>
+    <text x="152" y="205" font-size="11.5" fill="#FBEEDB">Default-deny firewall (22/80/443 only) · brute-force IPs dropped at the kernel before touching PHP</text>
+  </g>
+  <!-- 3 -->
+  <g>
+    <rect x="96" y="228" width="728" height="54" rx="9" fill="#1E8449"/>
+    <circle cx="126" cy="255" r="15" fill="#0B2545"/>
+    <text x="126" y="260" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">3</text>
+    <text x="152" y="250" font-size="13.5" font-weight="700" fill="#FFFFFF">Kernel MAC — AppArmor on all four daemons</text>
+    <text x="152" y="269" font-size="11.5" fill="#DFF2E7">Nginx · PHP-FPM · MariaDB · Redis each confined: no shell exec, write access only to designated paths</text>
+  </g>
+  <!-- 4 -->
+  <g>
+    <rect x="96" y="292" width="728" height="54" rx="9" fill="#123561" stroke="#2C4A73"/>
+    <circle cx="126" cy="319" r="15" fill="#1B6CA8"/>
+    <text x="126" y="324" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">4</text>
+    <text x="152" y="314" font-size="13.5" font-weight="700" fill="#FFFFFF">Service Hardening — sockets &amp; loopback only</text>
+    <text x="152" y="333" font-size="11.5" fill="#B9CCE0">Redis TCP disabled (port 0) · MariaDB on 127.0.0.1 · static FPM pool sizing kills OOM crashes · OPcache permission checks</text>
+  </g>
+  <!-- 5 -->
+  <g>
+    <rect x="96" y="356" width="728" height="54" rx="9" fill="#123561" stroke="#2C4A73"/>
+    <circle cx="126" cy="383" r="15" fill="#1B6CA8"/>
+    <text x="126" y="388" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">5</text>
+    <text x="152" y="378" font-size="13.5" font-weight="700" fill="#FFFFFF">Application — WordPress MU-plugin</text>
+    <text x="152" y="397" font-size="11.5" fill="#B9CCE0">XML-RPC off · user-enumeration blocked · generic login errors · honeypot spam defense · file editor locked</text>
+  </g>
+  <!-- 6 -->
+  <g>
+    <rect x="96" y="420" width="728" height="54" rx="9" fill="#123561" stroke="#2C4A73"/>
+    <circle cx="126" cy="447" r="15" fill="#1B6CA8"/>
+    <text x="126" y="452" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">6</text>
+    <text x="152" y="442" font-size="13.5" font-weight="700" fill="#FFFFFF">Data — immutable code, contained database</text>
+    <text x="152" y="461" font-size="11.5" fill="#B9CCE0">Core/plugin/theme paths read-only at kernel level · DB user without FILE privilege · secrets in .env, never in git</text>
+  </g>
+  <!-- 7 -->
+  <g>
+    <rect x="96" y="484" width="728" height="54" rx="9" fill="#123561" stroke="#2C4A73"/>
+    <circle cx="126" cy="511" r="15" fill="#1B6CA8"/>
+    <text x="126" y="516" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">7</text>
+    <text x="152" y="506" font-size="13.5" font-weight="700" fill="#FFFFFF">Observability — sandboxed telemetry &amp; alerting</text>
+    <text x="152" y="525" font-size="11.5" fill="#B9CCE0">Loopback-only node exporter · hourly AppArmor denial sweeps · Discord/Slack incident alerts · audit reports</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="440" y="586" text-anchor="middle" font-size="12" fill="#8FB3D4">A compromise must defeat all seven layers — and layers 2, 3 and 7 are watching while it tries.</text>
+  <text x="440" y="612" text-anchor="middle" font-size="11.5" fill="#5FA8DC" font-weight="600">SafeCloud.PRO · safecloud.pro</text>
+</svg>

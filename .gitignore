@@ -1,0 +1,59 @@
+# ==============================================================================
+# SafeCloud.PRO - Hardened WordPress/LEMP Stack Repository .gitignore
+# Prevents sensitive configuration files, keys, and installation logs from
+# leaking into public GitHub repositories.
+# ==============================================================================
+
+# --- System Secrets & Configuration ---
+.env
+.env.local
+.env.*.local
+*.env
+config.toml
+
+# --- Cryptographic Credentials & Keys ---
+*.pem
+*.key
+*.crt
+*.pub
+/etc/nginx/certs/cloudflare.crt
+/etc/mysql/cacert.pem
+/etc/mysql/*cert.pem
+/etc/mysql/*key.pem
+
+# --- Installation Logs & Performance Reports ---
+*.log
+installation_choices.log
+system_status_report.txt
+/tmp/ab_results.txt
+/tmp/redis_perf_results.txt
+
+# --- Generated per-instance artifacts (contain your instance/VPC ids) ---
+cloudflare-sg-commands.sh
+
+# --- OS & Environment Trash ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+~*
+.vscode/
+.idea/
+
+# --- Dependency Cache ---
+node_modules/
+vendor/
+composer.lock
+
+# --- WordPress Core Fallback (If repo is cloned in webroot) ---
+/wp-config.php
+/wp-content/uploads/
+/wp-content/cache/
+/wp-content/upgrade/
+/wp-content/blogs.dir/
+/sitemap.xml
+/sitemap.xml.gz

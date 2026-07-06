@@ -1,0 +1,97 @@
+# =============================================================================
+# SafeCloud.PRO - Hardened Systemd Service Profile for Prometheus Node Exporter
+# Target OS: Ubuntu 26.04 LTS
+# Binary Path: /usr/bin/prometheus-node-exporter
+# Service Path: /etc/systemd/system/prometheus-node-exporter.service
+# Version: 1.0.0 (LTS Hardened)
+# =============================================================================
+# This configuration file defines a highly sandboxed, hardened runtime environment
+# for the Prometheus Node Exporter. It restricts process privileges, isolates the
+# filesystem, limits hardware resource consumption, and protects local network loops.
+# =============================================================================
+
+[Unit]
+Description=Prometheus Node Exporter (Hardened Sandbox)
+Documentation=https://github.com/prometheus/node_exporter
+After=network.target
+
+[Service]
+# Execute as an unprivileged, dedicated system user and group
+User=prometheus
+Group=prometheus
+Type=simple
+
+# Execution command - bound strictly to local loopback (127.0.0.1:9100)
+# This prevents metrics scraping over public networks or unvetted VPC subnets.
+ExecStart=/usr/bin/prometheus-node-exporter --web.listen-address=127.0.0.1:9100
+
+# ----------------------------------------
+# 1. PROCESS SECURITY & PRIVILEGE BOUNDARIES
+# ----------------------------------------
+# Prevent the process and any of its children from gaining new privileges (Sudo-rs bypass block)
+NoNewPrivileges=true
+
+# Deny all kernel capabilities - Node Exporter requires zero root privileges to gather /proc metrics
+CapabilityBoundingSet=
+
+# Block execution of memory-write modifications and kernel personality changes
+LockPersonality=true
+
+# ----------------------------------------
+# 2. FILESYSTEM ISOLATION (MND-DSA / Least Privilege)
+# ----------------------------------------
+# Make the entire OS directory tree read-only to this service, except for /dev, /proc, and /sys
+ProtectSystem=strict
+
+# Completely hide and deny access to home directories (/home and /root)
+ProtectHome=true
+
+# Mount a private, isolated /tmp directory exclusive to this process
+PrivateTmp=true
+
+# Restrict the creation and modification of hardware devices (denies raw disk block access)
+PrivateDevices=true
+
+# Mount cgroup hierarchies and kernel tunables (/proc/sys, /sys) read-only
+ProtectControlGroups=true
+ProtectKernelTunables=true
+
+# Deny loading/unloading of kernel modules
+ProtectKernelModules=true
+
+# Deny read/write access to the kernel log ring buffer
+ProtectKernelLogs=true
+
+# ----------------------------------------
+# 3. KERNEL SYSTEM CALLS & NAMESPACES
+# ----------------------------------------
+# Restrict the process to only establish communication over IPv4, IPv6, and Unix local sockets
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Block the creation of nested namespaces (User, PID, Network, Mount)
+RestrictNamespaces=true
+
+# Disable real-time scheduling to prevent priority inversion attacks
+RestrictRealtime=true
+
+# Restrict system calls to basic file, memory, and networking operations
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @resources
+
+# ----------------------------------------
+# 4. RESOURCE CONFINEMENT (OOM Prevention & CPU Limits)
+# ----------------------------------------
+# Strict CPU slice limitation to prevent runaway collection threads from starving PHP/database queues
+CPUQuota=10%
+
+# Strict physical RAM ceilings to protect the 5.5 GB host safety margin
+# Node exporter typically consumes 15-30 MB; we enforce a hard ceiling at 100 MB.
+MemoryHigh=80M
+MemoryMax=100M
+
+# Limit the maximum number of processes/threads this unit can spawn
+TasksMax=10
+
+[Install]
+WantedBy=multi-user.target

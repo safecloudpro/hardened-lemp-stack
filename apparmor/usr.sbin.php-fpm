@@ -1,0 +1,163 @@
+# =============================================================================
+# SafeCloud.PRO - Hardened AppArmor Confinement Profile for PHP-FPM (WordPress/WooCommerce)
+# Target OS: Ubuntu 26.04 LTS
+# Binary Path: /usr/sbin/php-fpm* (Handles PHP 8.4, 8.5, and 8.6 dynamically)
+# Profile Path: /etc/apparmor.d/usr.sbin.php-fpm
+# =============================================================================
+
+#include <tunables/global>
+
+profile php-fpm /usr/sbin/php-fpm* flags=(attach_disconnected) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+  #include <abstractions/ssl_certs>
+
+  # ---------------------------------------------------------------------------
+  # 1. PROCESS CAPABILITIES & PRIVILEGES
+  # ---------------------------------------------------------------------------
+  # Allowed capabilities for master process initialization and worker spawning
+  capability setuid,
+  capability setgid,
+  capability chown,
+  capability dac_override,
+  capability dac_read_search,
+  capability sys_resource,
+  capability kill,
+  # sd_notify() readiness protocol tries SO_SNDBUFFORCE on the notify socket.
+  # Denying net_admin makes the kernel fall back gracefully, but silencing it
+  # here keeps the audit log free of a recurring benign denial.
+  capability net_admin,
+
+  # ---------------------------------------------------------------------------
+  # 2. FILE SYSTEM CONFIGURATION & RUNTIMES (PHP Core)
+  # ---------------------------------------------------------------------------
+  # PHP-FPM Binaries and Shared Libraries
+  /usr/sbin/php-fpm* mr,
+  /usr/lib/aarch64-linux-gnu/            r,  # Graviton/ARM64 hosts
+  /usr/lib/aarch64-linux-gnu/**          mr,
+  /usr/lib/x86_64-linux-gnu/             r,  # x86_64 hosts
+  /usr/lib/x86_64-linux-gnu/**           mr,
+
+  # Config Directory Read Access
+  /etc/php/ r,
+  /etc/php/** r,
+  /etc/mysql/mariadb.cnf r,
+  /etc/mysql/conf.d/ r,
+  /etc/mysql/conf.d/* r,
+  /etc/mysql/mariadb.conf.d/ r,
+  /etc/mysql/mariadb.conf.d/* r,
+
+  # Basic system configurations
+  /etc/nsswitch.conf r,
+  /etc/passwd r,
+  /etc/group r,
+  /etc/localtime r,
+  /etc/timezone r,
+
+  # SSL/TLS Root certificates (Needed for outbound API/payment gateway handshakes)
+  /etc/ssl/** r,
+
+  # Host /proc and /sys telemetry details
+  /proc/loadavg r,
+  /proc/meminfo r,
+  /proc/cpuinfo r,
+  /proc/stat r,
+  /proc/sys/kernel/random/uuid r,
+  /sys/devices/system/cpu/ r,
+  /sys/devices/system/cpu/** r,
+
+  # Temporary storage and system descriptors
+  /dev/urandom r,
+  /dev/random r,
+  /dev/null rw,
+  /run/php/ r,
+  /run/php/php*-fpm.pid rw,
+  /run/php/php*.sock rw,
+  /var/run/php/php*.sock rw,
+
+  # systemd readiness notification — the Ubuntu php-fpm unit is Type=notify.
+  # Without this write, systemd never receives READY=1 and kills the service
+  # with "start operation timed out" 90s after every (re)start.
+  /run/systemd/notify w,
+
+  # OPcache/JIT shared memory arrives via memfd_create(); under
+  # attach_disconnected those anonymous inodes surface as "/" (mask "wr").
+  owner / rw,
+
+  # ---------------------------------------------------------------------------
+  # 3. INTER-SERVICE COMMUNICATION SOCKETS (Local Loop Only)
+  # ---------------------------------------------------------------------------
+  # Allow connecting to local MariaDB Database Unix Socket
+  /run/mysqld/ r,
+  /run/mysqld/mysqld.sock rw,
+  /var/run/mysqld/mysqld.sock rw,
+
+  # Allow connecting to local Redis Socket (direct-memory Unix Pipe)
+  /run/redis/ r,
+  /run/redis/redis-server.sock rw,
+  /var/run/redis/redis-server.sock rw,
+
+  # ---------------------------------------------------------------------------
+  # 4. NETWORK PROTOCOLS
+  # ---------------------------------------------------------------------------
+  # Authorize outgoing TCP connections for external Payment APIs (Stripe, PayPal)
+  # and WordPress updates/remote webhooks
+  network inet stream,
+  network inet6 stream,
+
+  # Block raw sockets and incoming listening capabilities (PHP-FPM must not listen on port)
+  deny network raw,
+  deny network packet,
+
+  # ---------------------------------------------------------------------------
+  # 5. TRANSACTION LOGGING & SESSION CONTROL
+  # ---------------------------------------------------------------------------
+  # Standard PHP Error Logging and FPM Slow Logs
+  /var/log/php* r,
+  /var/log/php*.log w,
+  /var/log/php*-fpm-slow.log w,
+
+  # Write boundaries for native PHP session storage (if used instead of Redis)
+  /var/lib/php/sessions/ r,
+  /var/lib/php/sessions/** rw,
+
+  # PHP upload staging (upload_tmp_dir defaults to /tmp). "owner" limits
+  # access to files created by the www-data workers themselves.
+  owner /tmp/ r,
+  owner /tmp/php* rw,
+  owner /tmp/** rwk,
+
+  # ---------------------------------------------------------------------------
+  # 6. SITE WORKROOT CONFINEMENT (WordPress/WooCommerce Application)
+  # ---------------------------------------------------------------------------
+  # Core Application Read-Only Confinement
+  /var/www/html/ r,
+  /var/www/html/** r,
+
+  # STRICT LEAST PRIVILEGE WRITING BOUNDARIES (PCI DSS v4.0 Isolation)
+  # PHP-FPM must NEVER be allowed to write directly to PHP executable directories.
+  # This prevents malware/skimmers from injecting into core code.
+  deny /var/www/html/wp-admin/** w,
+  deny /var/www/html/wp-includes/** w,
+  deny /var/www/html/wp-content/plugins/** w,
+  deny /var/www/html/wp-content/themes/** w,
+  deny /var/www/html/*.php w,
+
+  # Authorized Write Directories (Media Uploads & Local WP Cache)
+  /var/www/html/wp-content/uploads/ r,
+  /var/www/html/wp-content/uploads/** rw,
+  /var/www/html/wp-content/cache/ r,
+  /var/www/html/wp-content/cache/** rw,
+
+  # ---------------------------------------------------------------------------
+  # 7. EXECUTION BOUNDARIES (Preventing RCE Exploits)
+  # ---------------------------------------------------------------------------
+  # Explicitly deny PHP-FPM from executing general OS system commands
+  # (Blocks shell escapes via exec, system, shell_exec, etc.)
+  deny /bin/** x,
+  deny /usr/bin/** x,
+  deny /usr/local/bin/** x,
+  deny /sbin/** x,
+  deny /usr/sbin/** x,
+}

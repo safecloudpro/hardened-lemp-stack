@@ -1,0 +1,54 @@
+# ==============================================================================
+# SafeCloud.PRO - logrotate policy for the stack's own log files
+# Deploy to: /etc/logrotate.d/safecloud
+# ==============================================================================
+# Nginx, MariaDB, Redis, and fail2ban ship their own logrotate rules via their
+# packages. This file covers the logs THIS repo's tooling writes, which would
+# otherwise grow unbounded:
+#   - the Security Sentinel cron output (scripts/alert-apparmor-status.sh)
+#   - the PHP-FPM slow log (path set by setup.sh: /var/log/phpX.Y-fpm-slow.log)
+#   - the interactive install log
+#
+# Test without rotating:  sudo logrotate -d /etc/logrotate.d/safecloud
+# Force a rotation once:   sudo logrotate -f /etc/logrotate.d/safecloud
+# ==============================================================================
+
+/var/log/safecloud_sentinel_cron.log {
+    su root root
+    weekly
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}
+
+/var/log/php*-fpm-slow.log {
+    weekly
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    su www-data www-data
+    create 0640 www-data www-data
+    postrotate
+        # Ask the running PHP-FPM master(s) to reopen their log files.
+        if command -v systemctl >/dev/null 2>&1; then
+            for u in $(systemctl list-units --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}'); do
+                systemctl kill -s USR1 "$u" 2>/dev/null || true
+            done
+        fi
+    endscript
+}
+
+/var/log/lemp_interactive_install.log {
+    su root root
+    monthly
+    rotate 6
+    missingok
+    notifempty
+    compress
+    copytruncate
+}
