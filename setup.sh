@@ -50,8 +50,11 @@ COMPONENTS=(
     "nginx-http3"
     "nginx-apparmor"
     "php-opcache"
+    "php-apparmor"
     "redis-cache"
+    "redis-apparmor"
     "mariadb"
+    "mariadb-apparmor"
     "prometheus-exporter"
 )
 
@@ -60,8 +63,11 @@ declare -A COMP_NAMES=(
     ["nginx-http3"]="Nginx Web Server with HTTP/3 & Cloudflare AOP"
     ["nginx-apparmor"]="Nginx AppArmor Profile Containment"
     ["php-opcache"]="PHP-FPM & OPcache Hardening"
+    ["php-apparmor"]="PHP-FPM AppArmor Profile Containment"
     ["redis-cache"]="Redis Object Cache (Unix-Socket Only)"
+    ["redis-apparmor"]="Redis AppArmor Profile Containment"
     ["mariadb"]="MariaDB 11.x Database Hardening"
+    ["mariadb-apparmor"]="MariaDB AppArmor Profile Containment"
     ["prometheus-exporter"]="Prometheus Exporter Local Isolation"
 )
 
@@ -70,8 +76,11 @@ declare -A COMP_DESCS=(
     ["nginx-http3"]="Installs Nginx with HTTP/3 support. Downloads the Cloudflare Authenticated Origin Pulls (AOP) CA cert to cryptographically block all requests not originating from Cloudflare's Edge. Enforces secure HTTP headers and blocks direct execution of PHP files in media upload directories."
     ["nginx-apparmor"]="Deploys a mandatory access control AppArmor profile to confine the Nginx daemon to strict read-only access on webroots, restrict process execution, limit socket traffic, and protect private SSL/TLS certificate directories."
     ["php-opcache"]="Installs PHP-FPM and tunes it. It sets up a highly reliable STATIC worker pool of children to eliminate CPU spawning spikes and prevent Out-Of-Memory (OOM) crashes on 16GB systems. It hardens OPcache memory permissions to block cross-pool sensitive database leaks, and enables CLI OPcache caching for fast WP-CLI crons."
+    ["php-apparmor"]="Deploys a mandatory access control AppArmor profile confining every PHP-FPM worker to its socket, upload staging, and outbound API needs — blocking shell spawns and writes into WordPress core/plugin/theme code even from a compromised plugin."
     ["redis-cache"]="Installs Redis as a WordPress object cache, bound exclusively to a local Unix domain socket (TCP port disabled entirely). Disables disk persistence for a pure in-memory cache role, caps memory at 1 GB with LRU eviction, and grants the web user socket access."
+    ["redis-apparmor"]="Deploys a mandatory access control AppArmor profile confining Redis to its data directory and Unix socket, and attaches it via a systemd drop-in (Ubuntu's redis-server.service sets NoNewPrivileges=true, which otherwise leaves Redis unconfined)."
     ["mariadb"]="Installs MariaDB and locks it down to localhost (127.0.0.1) to disable external network attacks. Allocates an optimized InnoDB buffer pool to host your WordPress database comfortably in-memory, while leaving ample system RAM headroom for expansion."
+    ["mariadb-apparmor"]="Deploys a mandatory access control AppArmor profile confining MariaDB to its data directory, denying every execution path on the system (neutralizing SQL-injection→file-write→execute chains). Disables Ubuntu's own generic mariadbd profile first, since two profiles claiming the same binary path leave the kernel confining neither."
     ["prometheus-exporter"]="Installs the Prometheus node_exporter to gather server telemetry metrics and binds it strictly to 127.0.0.1:9100. This isolates monitoring data locally, making it inaccessible to the public network or internal VPC subnets unless accessed via secure SSH local forwarding tunnels."
 )
 
@@ -485,6 +494,13 @@ get_installed_version() {
                 echo "N/A"
             fi
             ;;
+        "php-apparmor")
+            if [ -f /etc/apparmor.d/usr.sbin.php-fpm ]; then
+                echo "1.0.0"
+            else
+                echo "N/A"
+            fi
+            ;;
         "redis-cache")
             if command -v redis-server &>/dev/null; then
                 redis-server --version | grep -o -E 'v=[0-9]+\.[0-9]+\.[0-9]+' | cut -d'=' -f2
@@ -492,9 +508,23 @@ get_installed_version() {
                 echo "N/A"
             fi
             ;;
+        "redis-apparmor")
+            if [ -f /etc/apparmor.d/usr.sbin.redis-server ]; then
+                echo "1.0.0"
+            else
+                echo "N/A"
+            fi
+            ;;
         "mariadb")
             if command -v mariadb &>/dev/null; then
                 mariadb --version | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+-[a-zA-Z0-9.-]+' | head -n 1
+            else
+                echo "N/A"
+            fi
+            ;;
+        "mariadb-apparmor")
+            if [ -f /etc/apparmor.d/usr.sbin.mariadbd ]; then
+                echo "1.0.0"
             else
                 echo "N/A"
             fi
@@ -1098,7 +1128,43 @@ EOF
 fi
 
 # ==========================================================
-# 5. REDIS OBJECT CACHE (UNIX-SOCKET ONLY)
+# 5. PHP-FPM APPARMOR PROFILE CONTAINMENT
+# ==========================================================
+if prompt_install "php-apparmor"; then
+    echo -e "${GREEN}[+] Deploying PHP-FPM AppArmor security profile...${NC}"
+    if ! command -v apparmor_parser &>/dev/null; then
+        echo -e "${YELLOW}[*] AppArmor utilities not found. Installing apparmor-utils...${NC}"
+        apt-get install -y apparmor-utils
+    fi
+
+    _php_profile="${_SETUP_DIR}/apparmor/usr.sbin.php-fpm"
+    if [ ! -f "$_php_profile" ]; then
+        echo -e "${RED}[ERROR] ${_php_profile} not found — re-clone the repo so apparmor/ is present.${NC}"
+        COMP_STATUS["php-apparmor"]="FAILED (Profile File Missing)"
+    else
+        install -m 0644 "$_php_profile" /etc/apparmor.d/usr.sbin.php-fpm
+        if ! apparmor_parser -r -W /etc/apparmor.d/usr.sbin.php-fpm; then
+            echo -e "${RED}[ERROR] apparmor_parser rejected the profile; PHP-FPM left unconfined.${NC}"
+            COMP_STATUS["php-apparmor"]="FAILED (Profile Parse Error)"
+        else
+            systemctl reload apparmor 2>/dev/null || true
+            systemctl restart "php${PHP_VERSION}-fpm" || true
+            if systemctl is-active --quiet "php${PHP_VERSION}-fpm"; then
+                COMP_STATUS["php-apparmor"]="SUCCESS"
+            else
+                echo -e "${RED}[ERROR] php${PHP_VERSION}-fpm failed to start after loading the AppArmor profile.${NC}"
+                echo -e "${YELLOW}[HINT] Inspect denials with 'journalctl -k | grep -i apparmor' and 'systemctl status php${PHP_VERSION}-fpm'.${NC}"
+                echo -e "${YELLOW}       To unblock without removing confinement: 'aa-complain /etc/apparmor.d/usr.sbin.php-fpm' then restart, and add the denied paths to the profile.${NC}"
+                journalctl -u "php${PHP_VERSION}-fpm" -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+                COMP_STATUS["php-apparmor"]="FAILED (php-fpm not active under profile)"
+            fi
+        fi
+    fi
+    COMP_VERSIONS["php-apparmor"]="1.0.0"
+fi
+
+# ==========================================================
+# 6. REDIS OBJECT CACHE (UNIX-SOCKET ONLY)
 # ==========================================================
 if prompt_install "redis-cache"; then
     echo -e "${GREEN}[+] Installing and confining Redis object cache...${NC}"
@@ -1161,7 +1227,50 @@ EOF
 fi
 
 # ==========================================================
-# 6. MARIADB 11.x HARDENING
+# 7. REDIS APPARMOR PROFILE CONTAINMENT
+# ==========================================================
+if prompt_install "redis-apparmor"; then
+    echo -e "${GREEN}[+] Deploying Redis AppArmor security profile...${NC}"
+    if ! command -v apparmor_parser &>/dev/null; then
+        echo -e "${YELLOW}[*] AppArmor utilities not found. Installing apparmor-utils...${NC}"
+        apt-get install -y apparmor-utils
+    fi
+
+    _redis_profile="${_SETUP_DIR}/apparmor/usr.sbin.redis-server"
+    _redis_dropin="${_SETUP_DIR}/apparmor/redis-server-apparmor.conf"
+    if [ ! -f "$_redis_profile" ] || [ ! -f "$_redis_dropin" ]; then
+        echo -e "${RED}[ERROR] AppArmor profile/drop-in missing under ${_SETUP_DIR}/apparmor/ — re-clone the repo.${NC}"
+        COMP_STATUS["redis-apparmor"]="FAILED (Profile File Missing)"
+    else
+        install -m 0644 "$_redis_profile" /etc/apparmor.d/usr.sbin.redis-server
+        if ! apparmor_parser -r -W /etc/apparmor.d/usr.sbin.redis-server; then
+            echo -e "${RED}[ERROR] apparmor_parser rejected the profile; Redis left unconfined.${NC}"
+            COMP_STATUS["redis-apparmor"]="FAILED (Profile Parse Error)"
+        else
+            # Ubuntu's redis-server.service sets NoNewPrivileges=true, which blocks
+            # the kernel's implicit path-based attachment at exec() — a systemd
+            # drop-in must attach the profile explicitly.
+            mkdir -p /etc/systemd/system/redis-server.service.d
+            install -m 0644 "$_redis_dropin" /etc/systemd/system/redis-server.service.d/apparmor.conf
+            systemctl daemon-reload
+            systemctl reload apparmor 2>/dev/null || true
+            systemctl restart redis-server || true
+            if systemctl is-active --quiet redis-server; then
+                COMP_STATUS["redis-apparmor"]="SUCCESS"
+            else
+                echo -e "${RED}[ERROR] Redis failed to start after loading the AppArmor profile.${NC}"
+                echo -e "${YELLOW}[HINT] Inspect denials with 'journalctl -k | grep -i apparmor' and 'systemctl status redis-server'.${NC}"
+                echo -e "${YELLOW}       To unblock without removing confinement: 'aa-complain /etc/apparmor.d/usr.sbin.redis-server' then restart, and add the denied paths to the profile.${NC}"
+                journalctl -u redis-server -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+                COMP_STATUS["redis-apparmor"]="FAILED (redis-server not active under profile)"
+            fi
+        fi
+    fi
+    COMP_VERSIONS["redis-apparmor"]="1.0.0"
+fi
+
+# ==========================================================
+# 8. MARIADB 11.x HARDENING
 # ==========================================================
 if prompt_install "mariadb"; then
     echo -e "${GREEN}[+] Installing and configuring MariaDB Database...${NC}"
@@ -1206,7 +1315,53 @@ EOF
 fi
 
 # ==========================================================
-# 7. PROMETHEUS LOCALHOST ISOLATION
+# 9. MARIADB APPARMOR PROFILE CONTAINMENT
+# ==========================================================
+if prompt_install "mariadb-apparmor"; then
+    echo -e "${GREEN}[+] Deploying MariaDB AppArmor security profile...${NC}"
+    if ! command -v apparmor_parser &>/dev/null; then
+        echo -e "${YELLOW}[*] AppArmor utilities not found. Installing apparmor-utils...${NC}"
+        apt-get install -y apparmor-utils
+    fi
+
+    _mariadb_profile="${_SETUP_DIR}/apparmor/usr.sbin.mariadbd"
+    if [ ! -f "$_mariadb_profile" ]; then
+        echo -e "${RED}[ERROR] ${_mariadb_profile} not found — re-clone the repo so apparmor/ is present.${NC}"
+        COMP_STATUS["mariadb-apparmor"]="FAILED (Profile File Missing)"
+    else
+        # Ubuntu's mariadb-server package ships its own /etc/apparmor.d/mariadbd
+        # profile attached to the SAME binary path. Two profiles claiming one
+        # binary leaves the kernel unable to pick one — mariadbd runs unconfined
+        # under EITHER. Disable the distro profile before loading this one.
+        if [ -f /etc/apparmor.d/mariadbd ]; then
+            mkdir -p /etc/apparmor.d/disable
+            ln -sf /etc/apparmor.d/mariadbd /etc/apparmor.d/disable/mariadbd
+            apparmor_parser -R /etc/apparmor.d/mariadbd 2>/dev/null || true
+        fi
+
+        install -m 0644 "$_mariadb_profile" /etc/apparmor.d/usr.sbin.mariadbd
+        if ! apparmor_parser -r -W /etc/apparmor.d/usr.sbin.mariadbd; then
+            echo -e "${RED}[ERROR] apparmor_parser rejected the profile; MariaDB left unconfined.${NC}"
+            COMP_STATUS["mariadb-apparmor"]="FAILED (Profile Parse Error)"
+        else
+            systemctl reload apparmor 2>/dev/null || true
+            systemctl restart mariadb || true
+            if systemctl is-active --quiet mariadb; then
+                COMP_STATUS["mariadb-apparmor"]="SUCCESS"
+            else
+                echo -e "${RED}[ERROR] MariaDB failed to start after loading the AppArmor profile.${NC}"
+                echo -e "${YELLOW}[HINT] Inspect denials with 'journalctl -k | grep -i apparmor' and 'systemctl status mariadb'.${NC}"
+                echo -e "${YELLOW}       To unblock without removing confinement: 'aa-complain /etc/apparmor.d/usr.sbin.mariadbd' then restart, and add the denied paths to the profile.${NC}"
+                journalctl -u mariadb -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+                COMP_STATUS["mariadb-apparmor"]="FAILED (mariadb not active under profile)"
+            fi
+        fi
+    fi
+    COMP_VERSIONS["mariadb-apparmor"]="1.0.0"
+fi
+
+# ==========================================================
+# 10. PROMETHEUS LOCALHOST ISOLATION
 # ==========================================================
 if [ "$INSTALL_EXPORTERS" = "true" ]; then
     if prompt_install "prometheus-exporter"; then
@@ -1225,7 +1380,7 @@ else
 fi
 
 # ==========================================================
-# 8. SUMMARY LOG WRITING & FINALIZE REPORT
+# 11. SUMMARY LOG WRITING & FINALIZE REPORT
 # ==========================================================
 echo -e "\n${CYAN}======================================================================${NC}"
 echo -e "  ${BOLD}GENERATING SYSTEM HARDENING SUMMARY LOG${NC}"
