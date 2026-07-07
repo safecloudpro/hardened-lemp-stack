@@ -103,8 +103,8 @@ RESERVED_SYS_MB=0; REDIS_MAXMEMORY_MB=0; DB_POOL_MB=0
 
 # ----- small helpers ----------------------------------------------------------
 is_installed(){ command -v "$1" &>/dev/null; }
-svc_state(){ systemctl is-active "$1" 2>/dev/null || echo inactive; }
-svc_enabled(){ systemctl is-enabled "$1" 2>/dev/null || echo disabled; }
+svc_state(){ local out; out=$(systemctl is-active "$1" 2>/dev/null); echo "${out:-inactive}"; }
+svc_enabled(){ local out; out=$(systemctl is-enabled "$1" 2>/dev/null); echo "${out:-disabled}"; }
 
 detect_php_version() {
     if [ "$PHP_VERSION" != "auto" ]; then echo "$PHP_VERSION"; return; fi
